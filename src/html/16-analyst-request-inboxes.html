@@ -18,4 +18,21 @@
         <div id="reviewerLimitRequestsEmpty" class="empty-state"><span class="empty-icon">↗</span><strong>No hay aumentos de cupo solicitados</strong><p>Las solicitudes de los clientes aparecerán aquí para su evaluación.</p></div>
       </section>
       </section>
+      <section class="reviewer-request-panel" data-reviewer-request-panel="advances" hidden>
+        <section class="reviewer-kpi-grid" aria-label="Resumen de avances">
+          <article class="reviewer-kpi pending-kpi"><span>Avances pendientes</span><strong id="reviewerAutomaticAdvancesPending">0</strong><small>Créditos ya aprobados</small></article>
+          <article class="reviewer-kpi"><span>Fondos por trasladar</span><strong id="reviewerAutomaticAdvancesAmount">$ 0</strong><small>Saldo aún disponible en tarjetas</small></article>
+          <article class="reviewer-kpi approved-kpi"><span>Avances realizados</span><strong id="reviewerAutomaticAdvancesCompleted">0</strong><small>Registrados en esta sesión</small></article>
+        </section>
+        <section class="reviewer-inbox reviewer-limit-inbox">
+          <div class="reviewer-inbox-heading"><div><p class="eyebrow">COLA AUTOMÁTICA</p><h2>Avances parciales y pendientes</h2><p>Los avances parciales y automáticos quedan registrados aquí, separados de las solicitudes de crédito. Los desembolsos aprobados se trasladan al cumplirse la espera configurada, sin depender de un aumento de cupo.</p></div></div>
+          <div id="reviewerAutomaticAdvancesList" class="reviewer-applications-list"></div>
+          <div id="reviewerAutomaticAdvancesEmpty" class="empty-state" hidden><span class="empty-icon">↗</span><strong>No hay avances pendientes</strong><p>Los fondos de tarjeta aprobados aparecerán aquí mientras esperan su traslado automático.</p></div>
+        </section>
+        <section class="reviewer-inbox reviewer-limit-inbox">
+          <div class="reviewer-inbox-heading"><div><p class="eyebrow">MOVIMIENTOS RECIENTES</p><h2>Avances realizados</h2></div></div>
+          <div id="reviewerAutomaticAdvancesHistory" class="reviewer-applications-list"></div>
+          <div id="reviewerAutomaticAdvancesHistoryEmpty" class="empty-state" hidden><span class="empty-icon">↻</span><strong>Aún no hay avances registrados</strong><p>Cada avance parcial y automático se mostrará aquí con su monto y fecha.</p></div>
+        </section>
+      </section>
       </section>

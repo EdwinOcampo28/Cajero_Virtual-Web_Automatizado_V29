@@ -15,11 +15,12 @@ La entrega actual se identifica como **v29** e incluye el reinicio de datos acce
 - Retiros: máximo **$20.000.000** por operación; el importe retirado se acredita automáticamente a la Tesorería independiente **•••• 0004** y la comisión fija de **$50.000** se descuenta por separado.
 - Transferencias: máximo **$20.000.000** por operación; el destinatario recibe el importe completo y al emisor se le cobra una comisión de **$50.000**.
 - Las cuentas de clientes no tienen tope acumulado de ahorros. Los retiros y transferencias conservan sus máximos por operación de **$20.000.000**. La Tesorería no es una cuenta de ahorro, no tiene tarjeta ni créditos, y no permite transferencias manuales; su historial muestra los depósitos financiados y los retiros recibidos.
-- Avances desde la tarjeta a ahorros: solo a **6 o 12 cuotas**, con comisión de **$100.000**; los fondos trasladados no cuentan como otro desembolso original.
+- Avances desde la tarjeta a ahorros: plazo configurable de **6 a 60 cuotas** en intervalos de 6 meses, con comisión de **$100.000**; los fondos trasladados no cuentan como otro desembolso original.
 - Créditos personales: máximo **$100.000.000** por solicitud, sujetos al capital disponible del analista y al cupo autorizado del cliente.
 - Saldo base configurable del analista: **$2.000.000.000** por defecto, más intereses y comisiones efectivamente cobrados, menos los créditos activos y los fondos que aún siguen en las tarjetas.
-- Aumento de cupo: el importe de cada aumento se configura desde el panel; no hay máximo comercial acumulado (solo el rango de enteros exactos del navegador). Al aprobarlo, la tarjeta recibe los fondos y el crédito se activa a **12 cuotas con tasa ilustrativa del 2,00 % mensual** únicamente cuando el cliente realiza avances.
+- Aumento de cupo: el importe de cada aumento se configura desde el panel; no hay máximo comercial acumulado. Al aprobarlo, los fondos pasan a la tarjeta y el avance automático traslada el saldo aprobado a ahorros después de la espera configurada; mantiene **12 cuotas al 2,00 % mensual**.
 - El analista puede configurar por separado, en segundos o minutos, cuánto esperar antes de aprobar automáticamente créditos y aumentos de cupo.
+- Los intervalos de pago de créditos y avances se configuran por separado, también en segundos o minutos. Todo desembolso aprobado puede avanzar automáticamente tras la espera configurada, incluso sin solicitar aumento de cupo; las cuotas empiezan desde el momento del avance.
 - Deuda: cada titular mantiene como máximo una deuda activa unificada. Los pagos separan capital e intereses; el capital pagado recupera disponibilidad de avance, mientras que los intereses solo se cuentan como ganancia una vez pagados.
 
 ## Novedades v29
@@ -68,7 +69,7 @@ Esta protección reduce conflictos comunes entre pestañas, pero el almacenamien
 
 ### Reinicio seguro
 
-El botón **Borrar todos los datos del sistema** exige confirmación. Si una escritura de reinicio falla, intenta recuperar el estado anterior; además, evita restaurar un respaldo antiguo encima de un valor distinto que otra pestaña haya guardado entretanto.
+El botón **Borrar datos guardados** está disponible desde el inicio de sesión y exige confirmación. Elimina primero las claves de datos antiguas y después intenta guardar el estado inicial limpio; si el navegador no tiene espacio, no restaura los datos dañados.
 
 ## Organización del código
 
@@ -256,15 +257,15 @@ Para verificarlo, ejecuta `node tools/test-withdrawal-recipient-account.js`; el 
 
 ## Novedades v43: automatización financiera
 
-- Mientras exista capacidad disponible, cada cuenta recibe una solicitud aleatoria de crédito cada hora, dentro del cupo autorizado y el máximo vigente de **$100.000.000** por solicitud. El analista automático la aprueba un minuto después; el desembolso se carga a la tarjeta y el avance automático lo traslada a ahorros, donde se crea la deuda a **6 o 12 cuotas**.
-- Las cuotas se descuentan automáticamente de ahorros cada **5 minutos** para créditos a 6 cuotas y cada **3 minutos** para créditos a 12 cuotas. Si falta saldo, el sistema vuelve a intentarlo al siguiente intervalo.
+- Mientras exista capacidad disponible, cada cuenta recibe solicitudes aleatorias de crédito según el intervalo configurado. Tras aprobarse, el desembolso se carga a la tarjeta y pasa automáticamente a ahorros al cumplirse la espera; los plazos se eligen entre **6 y 60 cuotas**.
+- Los pagos automáticos de créditos y de avances tienen intervalos independientes configurables por plazo. Si falta saldo, el sistema vuelve a intentarlo al siguiente intervalo.
 - Cada hora, Tesorería distribuye en partes iguales todo el saldo que puedan recibir las tres cuentas. Se respeta el tope de ahorro de **$200.000.000** por cuenta; el saldo que no quepa por igual permanece en Tesorería.
 - Las solicitudes automáticas no cambian los aumentos de cupo: siguen manuales, en incrementos de **$50.000.000** y con el máximo de tarjeta de **$500.000.000**.
 - Los eventos usan marcas de tiempo reales y se recuperan al volver a abrir la app. Al ser una aplicación local sin servidor, los cambios se calculan al reabrir; no hay un proceso ejecutándose mientras el navegador está totalmente cerrado.
 
 ## Novedades v44: automatización configurable
 
-El panel de configuración permite ajustar cada cuántos minutos se generan solicitudes automáticas, se pagan créditos a 6 y 12 cuotas y se reparte Tesorería. También permite definir rangos de montos para créditos y avances automáticos, elegir entre avanzar el crédito completo o un monto aleatorio, y escoger plazo aleatorio, 6 o 12 cuotas. Los montos se eligen en incrementos de $100.000 y siguen sujetos a los límites de capital, tarjeta y ahorros. Si el crédito supera el avance automático, el saldo restante queda en la tarjeta.
+El panel de configuración permite ajustar los intervalos de solicitudes, aprobaciones, avances y pagos. Incluye una sesión de solicitudes para revisar créditos, cupos y la cola de avances automáticos. Permite escoger plazos de 6 a 60 meses, definir rangos de montos y elegir entre avanzar el crédito completo o un monto aleatorio. Los montos se eligen en incrementos de $100.000 y siguen sujetos a los límites de capital, tarjeta y ahorros. Si el crédito supera el avance automático, el saldo restante queda en la tarjeta.
 
 Al guardar, se reprograman los próximos eventos y la frecuencia de pago de los créditos activos. La tasa, el tope del cronómetro y los topes de aumento de cupo siguen conservando sus reglas actuales.
 
@@ -318,5 +319,13 @@ El panel permite configurar cada cuánto se generan solicitudes automáticas de 
 ## Entrega v29: recuperación desde el inicio de sesión
 
 - El acceso de clientes incluye un botón para borrar los datos guardados y reiniciar la simulación, incluso si la base local no se pudo validar.
+- El panel permite configurar cuánto espera el avance automático después de aprobarse el crédito. Durante la espera, el desembolso permanece en la tarjeta y la deuda se activa al pasar los fondos a ahorros.
 - El borrado elimina primero los datos dañados y luego intenta guardar una base limpia. Si el navegador no tiene espacio, los datos previos siguen borrados y se puede volver a abrir la aplicación para crear una nueva demostración.
 - La etiqueta de esta entrega es **v29**.
+
+## Automatización protegida y avances parciales
+
+- El panel del analista separa **Avances** de **Créditos**. Cada avance parcial aparece con su importe, plazo y fecha; el saldo que queda en la tarjeta conserva su propio reintento automático.
+- La configuración inicial programa créditos cada **1 hora**, aprobación en **60 segundos**, avance en **30 segundos**, pagos de créditos y avances cada **5 minutos** para 6 cuotas y **3 minutos** para plazos de 12 a 60, y aumentos de cupo cada **24 horas** con aprobación en **60 segundos**.
+- La automatización reserva **$500.000.000** del capital del analista por defecto. Créditos y aumentos pendientes también apartan fondos; cuando el capital libre no alcanza, las nuevas solicitudes esperan y se reintentan sin usar la reserva.
+- Al migrar los datos existentes, la automatización queda activa y adopta estos intervalos una sola vez. Luego se pueden editar en Configuración; la reserva también se puede ajustar.

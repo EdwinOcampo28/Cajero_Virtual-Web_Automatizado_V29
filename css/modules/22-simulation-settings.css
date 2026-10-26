@@ -31,3 +31,25 @@
 .simulation-automation-toolbar [data-paused='false'] { color: #68dca4; font-weight: 750; }
 @media (max-width: 760px) { .simulation-settings-grid { grid-template-columns: 1fr; } .simulation-settings-actions { align-items: stretch; flex-direction: column; } .simulation-settings-actions .button { width: 100%; } }
 @media (max-width: 520px) { .simulation-automation-toolbar { align-items: stretch; flex-direction: column; } .simulation-automation-toolbar .button { width: 100%; } .simulation-setting-input select.simulation-setting-unit { flex-basis: 7.2rem; width: 7.2rem; } .simulation-settings-group { padding: .8rem; } .simulation-settings-heading-icon { width: 2.5rem; height: 2.5rem; flex-basis: 2.5rem; } }
+
+
+.simulation-profile-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.simulation-profile-card { display: grid; align-content: start; gap: .75rem; min-width: 0; padding: 1rem; border: 1px solid rgba(126, 173, 200, .18); border-radius: 14px; background: rgba(3, 15, 26, .48); }
+.simulation-profile-card-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.simulation-profile-card-heading h4 { margin: 0; color: #e7f5fb; font-size: .95rem; }
+.simulation-profile-badge { flex: 0 0 auto; padding: .28rem .6rem; border: 1px solid rgba(104, 220, 230, .24); border-radius: 999px; background: rgba(104, 220, 230, .1); color: #81e5ed; font-size: .73rem; font-weight: 750; }
+.simulation-profile-card > p { margin: 0; color: var(--muted, #94aabc); font-size: .76rem; line-height: 1.5; }
+.simulation-profile-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.simulation-profile-actions .button { min-height: 40px; padding-inline: .8rem; }
+.simulation-profile-actions .button:disabled { opacity: .48; cursor: not-allowed; }
+.simulation-profile-card > .simulation-profile-status { min-height: 2.2em; }
+.simulation-profile-status.error-message { color: #ff9c9c; }
+@media (max-width: 760px) { .simulation-profile-grid { grid-template-columns: 1fr; } }
+@media (max-width: 520px) { .simulation-profile-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); } .simulation-profile-actions .button { width: 100%; } }
+
+.simulation-active-config-actions { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding-top: .8rem; border-top: 1px solid rgba(126, 173, 200, .14); }
+.simulation-active-config-actions .form-message { margin: 0; color: var(--muted, #94aabc); font-size: .76rem; }
+.simulation-active-config-actions .button:disabled { opacity: .48; cursor: not-allowed; }
+@media (max-width: 520px) { .simulation-active-config-actions { align-items: stretch; flex-direction: column; } .simulation-active-config-actions .button { width: 100%; } }
+
+.simulation-profile-guidance { margin: 0; color: var(--muted, #94aabc); font-size: .76rem; line-height: 1.5; }

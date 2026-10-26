@@ -69,7 +69,7 @@
     if (!reviewerSession) return;
     if (typeof populateReviewerClientFilter === 'function') populateReviewerClientFilter();
     const allApplications = Array.isArray(db.creditApplications)
-      ? db.creditApplications.filter((item) => item.origin !== 'Aumento de cupo' || Number(item.activatedAmount) > 0)
+      ? db.creditApplications.filter((item) => item.origin !== 'Aumento de cupo')
       : [];
     const selectedClientId = getReviewerSelectedClientId();
     const applications = allApplications.filter((item) => selectedClientId === null || Number(item.accountId) === selectedClientId);
@@ -88,6 +88,7 @@
     if (typeof renderReviewerClientSummary === 'function') renderReviewerClientSummary();
     renderReviewerApplications();
     renderReviewerLimitIncreaseRequests();
+    if (typeof renderReviewerAutomaticAdvances === 'function') renderReviewerAutomaticAdvances();
     const activePage = reviewerView?.querySelector('[data-reviewer-tab][aria-current="page"]')?.dataset.reviewerTab;
     if (activePage === 'tools') {
       if (typeof renderFinancialAuditPanel === 'function') renderFinancialAuditPanel();

@@ -30,7 +30,7 @@
     loan.monthlyRate = Number.isFinite(loan.monthlyRate) ? loan.monthlyRate : currentMonthlyInterestRate();
     loan.monthlyPayment = roundMoney(calculateCreditEstimate(loan.outstandingPrincipal, months, loan.monthlyRate).monthlyPayment);
     loan.termMonths = Math.max(0, Number(loan.installmentsPaid) || 0) + months;
-    loan.automaticPaymentIntervalSeconds = automaticPaymentIntervalForTerm(loan.termMonths);
+    loan.automaticPaymentIntervalSeconds = automaticPaymentIntervalForTerm(loan.termMonths, db, loan.paymentScheduleType);
     loan.nextAutomaticPaymentAt = new Date(Date.parse(scheduleAt) + loan.automaticPaymentIntervalSeconds * 1000).toISOString();
     if (!loan.nextDueDate) loan.nextDueDate = addMonthsToDate(localDateKey(), 1);
     const linkedApplicationIds = new Set([...(Array.isArray(loan.applicationIds) ? loan.applicationIds : []), ...(loan.applicationId ? [loan.applicationId] : [])]);
@@ -62,6 +62,7 @@
     loan.principalOriginal = loan.originalDisbursedTotal;
     loan.applicationIds = Array.from(new Set([...(Array.isArray(loan.applicationIds) ? loan.applicationIds : []), ...(loan.applicationId ? [loan.applicationId] : [])]));
     loan.source = loan.originalDisbursedTotal > 0 ? 'Crédito unificado' : 'Avance de capital recuperado';
+    loan.paymentScheduleType = 'advance';
     recalculateUnifiedLoanSchedule(loan, chosenTerm);
     return loan;
   }

@@ -8,7 +8,7 @@
     const selectedTerm = Number(advanceTermSelect?.value || 12);
     clearCardFormError('cardFunds');
     if (!validIntegerAmount(rawAmount)) return cardFormProblem('cardFunds', 'Ingresa un importe entero mayor que cero, sin decimales.');
-    if (!VALID_CARD_ADVANCE_TERMS.includes(selectedTerm)) return cardFormProblem('cardFunds', 'Para los avances, selecciona un plazo de 6 o 12 cuotas.');
+    if (!VALID_CARD_ADVANCE_TERMS.includes(selectedTerm)) return cardFormProblem('cardFunds', 'Para los avances, selecciona un plazo entre 6 y 60 cuotas, en intervalos de 6.');
     const card = current.card;
     const totalAvailable = availableAdvancesForCard(card);
     if (amount > totalAvailable) return cardFormProblem('cardFunds', `No hay suficientes fondos disponibles para avanzar. Disponible: ${money(totalAvailable)}.`);

@@ -1,5 +1,6 @@
   const STORAGE_KEY = 'cajero_virtual_savings_v15_clean';
   const LEGACY_STORAGE_KEY = 'cajero_virtual_savings_v1';
+  const SIMULATION_CONFIG_STORAGE_KEY = 'cajero_virtual_simulation_config_v1';
   const MAX_WITHDRAWAL_AMOUNT = 20000000;
   const MAX_DEPOSIT_AMOUNT = 20000000;
   const MAX_TRANSFER_AMOUNT = 20000000;
@@ -29,8 +30,8 @@
   const MAX_CREDIT_APPLICATIONS = 500;
   const MAX_LIMIT_INCREASE_REQUESTS = 500;
   const MAX_CLOSED_LOANS = 200;
-  const VALID_CREDIT_TERMS = [6, 12];
-  const VALID_CARD_ADVANCE_TERMS = [6, 12];
+  const VALID_CREDIT_TERMS = [6, 12, 18, 24, 30, 36, 42, 48, 54, 60];
+  const VALID_CARD_ADVANCE_TERMS = [6, 12, 18, 24, 30, 36, 42, 48, 54, 60];
   const SIMULATION_HOUR_MS = 60 * 60 * 1000;
   const SIMULATION_APPROVAL_DELAY_MS = 60 * 1000;
   const AUTOMATIC_PAYMENT_INTERVAL_MS = { 6: 5 * 60 * 1000, 12: 3 * 60 * 1000 };

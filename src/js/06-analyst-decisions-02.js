@@ -87,7 +87,9 @@
         reviewerName: REVIEWER_NAME,
         reviewerNote: note.slice(0, 500),
         origin: 'Aumento de cupo',
-        limitIncreaseRequestId: request.id
+        limitIncreaseRequestId: request.id,
+        autoAdvanceEnabled: true,
+        autoAdvanceAt: new Date(Date.now() + simulationSettingsFor(db).automaticAdvanceDelaySeconds * 1000).toISOString()
       };
       automaticApplication.activatedAmount = 0;
       automaticApplication.cardFundsRemaining = 0;

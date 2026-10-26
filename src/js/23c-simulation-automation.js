@@ -1,4 +1,16 @@
   const SIMULATION_AUTOMATION_TICK_MS = 1000;
+  function automaticAdvanceIsScheduled(application) {
+    return application?.automaticSimulation === true || application?.autoAdvanceEnabled === true
+      || (typeof application?.autoApprovedAt === 'string' && Number.isFinite(Date.parse(application.autoApprovedAt)))
+      || (typeof application?.autoAdvanceAt === 'string' && Number.isFinite(Date.parse(application.autoAdvanceAt)));
+  }
+  function scheduledAdvanceAmountForApplication(application) {
+    if (!application) return 0;
+    const pending = db?.accounts?.[application.accountId]?.card?.pendingDisbursements;
+    const entry = Array.isArray(pending) ? pending.find((item) => item.applicationId === application.id) : null;
+    const queuedAmount = Math.max(0, roundMoney(Number(entry?.remainingAmount) || 0));
+    return queuedAmount || Math.max(0, roundMoney(Number(application.cardFundsRemaining) || 0));
+  }
   const SIMULATION_AUTOMATION_SAVE_MS = 15000;
   const SIMULATION_AUTOMATION_EVENT_LIMIT = 20000;
   let simulationAutomationTimerId = null;
@@ -18,11 +30,26 @@
       .reduce((total, application) => total + Math.max(0, Number(application.amount) || 0), 0));
   }
 
+  function automaticLimitIncreaseReservedAmount(exceptRequestId = null) {
+    return roundMoney((Array.isArray(db?.limitIncreaseRequests) ? db.limitIncreaseRequests : [])
+      .filter((request) => request.id !== exceptRequestId && (request.status || 'En revisión') === 'En revisión')
+      .reduce((total, request) => total + Math.max(0, Number(request.increaseAmount)
+        || (Number(request.requestedLimit) - Number(request.previousLimit)) || 0), 0));
+  }
+
+  function automaticAnalystCapitalAvailable(exceptApplicationId = null, exceptRequestId = null) {
+    const settings = simulationSettingsFor(db);
+    const reserve = Math.min(settings.analystCapital, settings.automaticAnalystCapitalReserve);
+    const reserved = automaticCreditReservedAmount(exceptApplicationId)
+      + automaticLimitIncreaseReservedAmount(exceptRequestId);
+    return Math.max(0, roundMoney(availableAnalystCapital() - reserve - reserved));
+  }
+
   function automaticCreditCapacityForAccount(accountId, exceptApplicationId = null) {
     const current = db?.accounts?.[accountId];
     const card = current?.card;
     if (!current || !card) return 0;
-    const analystSpace = Math.max(0, availableAnalystCapital() - automaticCreditReservedAmount(exceptApplicationId));
+    const analystSpace = automaticAnalystCapitalAvailable(exceptApplicationId);
     const personalSpace = availablePersonalCreditForAccount(accountId);
     const cardSpace = Math.max(0, cardLimitForRecord(card) - availableAdvancesForCard(card));
     const savingsSpace = Math.max(0, maxSavingsBalanceForAccount(accountId) - current.balance + ADVANCE_FEE);
@@ -48,7 +75,7 @@
       const maximumSteps = Math.floor(maximum / MIN_CREDIT_AMOUNT);
       if (maximumSteps < minimumSteps) continue;
       const amount = randomIntegerBetween(minimumSteps, maximumSteps) * MIN_CREDIT_AMOUNT;
-      const termMonths = settings.automaticCreditTermMonths || (Math.random() < 0.5 ? 6 : 12);
+      const termMonths = settings.automaticCreditTermMonths || VALID_CREDIT_TERMS[Math.floor(Math.random() * VALID_CREDIT_TERMS.length)];
       const monthlyRate = currentMonthlyInterestRate();
       const estimate = calculateCreditEstimate(amount, termMonths, monthlyRate);
       const application = {
@@ -89,25 +116,22 @@
     let generated = 0;
     for (let accountId = 1; accountId <= MAX_ACCOUNT_ID; accountId += 1) {
       const current = db.accounts[accountId];
-      if (!current?.card) continue;
+      if (!current?.card || automaticAnalystCapitalAvailable() < increaseAmount) continue;
       const hasPending = db.limitIncreaseRequests.some((request) => request.accountId === accountId && (request.status || 'En revisión') === 'En revisión');
       if (hasPending) continue;
       const previousLimit = cardCreditLimitForAccount(accountId);
       const requestedLimit = roundMoney(previousLimit + increaseAmount);
       if (requestedLimit > MAX_CARD_LIMIT) continue;
-      const approvalEnabled = simulationSettingsFor(db).automaticLimitIncreaseApprovalEnabled === true;
       const request = {
         id: createId(), accountId, applicantName: current.name, accountNumber: current.accountNumber,
         previousLimit, increaseAmount, requestedLimit, termMonths: 12, status: 'En revisión', date: requestDate,
         automaticSimulation: true,
-        autoApprovalAt: approvalEnabled ? new Date(requestedAt + simulationSettingsFor(db).automaticLimitIncreaseApprovalDelaySeconds * 1000).toISOString() : null
+        autoApprovalAt: new Date(requestedAt + simulationSettingsFor(db).automaticLimitIncreaseApprovalDelaySeconds * 1000).toISOString()
       };
       db.limitIncreaseRequests.unshift(request);
       recordAuditEvent('Solicitud automática de aumento de cupo generada', {
         category: 'cupo', accountId, amount: increaseAmount, source: 'Simulación', referenceId: request.id,
-        description: approvalEnabled
-          ? 'Solicitud de aumento generada automáticamente; se aprobará al cumplirse el tiempo configurado.'
-          : 'Solicitud de aumento generada automáticamente y pendiente de aprobación manual del analista.',
+        description: 'Solicitud de aumento generada automáticamente; se aprobará al cumplirse el tiempo configurado.',
         details: { previousLimit, requestedLimit, termMonths: 12 }, date: requestDate
       });
       generated += 1;
@@ -143,7 +167,7 @@
     if (!target?.card || !Number.isSafeInteger(increaseAmount) || increaseAmount <= 0 || request.requestedLimit !== currentLimit + increaseAmount || request.requestedLimit > MAX_CARD_LIMIT) {
       return reject('La solicitud superaría el rango numérico seguro o el aumento ya no coincide con el cupo actual.');
     }
-    const analystAvailable = availableAnalystCapital();
+    const analystAvailable = automaticAnalystCapitalAvailable(null, request.id);
     const exposure = outstandingCreditExposureForAccount(request.accountId);
     if (increaseAmount > analystAvailable || exposure + increaseAmount > request.requestedLimit
       || availableAdvancesForCard(target.card) + increaseAmount > request.requestedLimit) {
@@ -153,6 +177,7 @@
     const application = {
       id: createId(), accountId: request.accountId, applicantName: target.name, accountNumber: target.accountNumber,
       amount: increaseAmount, monthlyIncome: 0, termMonths: 12, monthlyRate: currentMonthlyInterestRate(),
+      autoAdvanceEnabled: true, autoAdvanceAt: new Date(approvalAt + simulationSettingsFor(db).automaticAdvanceDelaySeconds * 1000).toISOString(),
       employment: 'Aumento de cupo',
       purpose: `Desembolso automático por aumento de cupo (${money(currentLimit)} a ${money(request.requestedLimit)})`,
       monthlyPayment: estimate.monthlyPayment, totalPayable: estimate.totalPayable, totalInterest: estimate.totalInterest,
@@ -286,26 +311,34 @@
     return true;
   }
 
-  function approveAndAdvanceAutomaticCredit(application, approvalAt) {
+  function deferAutomaticCreditAdvance(application, advanceAt, reason = 'El avance no pudo completarse con los fondos disponibles.') {
+    const previousIssue = application.autoAdvanceIssue;
+    const retryBase = Math.max(advanceAt, Date.now());
+    application.autoAdvanceAt = new Date(retryBase + simulationSettingsFor(db).automaticAdvanceDelaySeconds * 1000).toISOString();
+    application.autoAdvanceDeferredAt = new Date(advanceAt).toISOString();
+    application.autoAdvanceIssue = reason;
+    if (previousIssue !== reason) {
+      recordAuditEvent('Avance automático pendiente', {
+        category: 'creditos', accountId: application.accountId, amount: Number(application.cardFundsRemaining) || 0,
+        source: 'Sistema', referenceId: application.id, description: reason,
+        details: { retryAt: application.autoAdvanceAt }, date: new Date(advanceAt).toISOString()
+      });
+    }
+    return true;
+  }
+
+  function approveAutomaticCreditAndDisburse(application, approvalAt) {
     const amount = roundMoney(application.amount);
     const accountId = application.accountId;
     const current = db.accounts[accountId];
     const settings = simulationSettingsFor(db);
     const capacity = automaticCreditCapacityForAccount(accountId, application.id);
-    const savingsSpaceForAdvance = current ? Math.max(0, maxSavingsBalanceForAccount(accountId) - current.balance + ADVANCE_FEE) : 0;
-    const maximumAdvance = Math.min(amount, settings.automaticAdvanceMaximumAmount, savingsSpaceForAdvance);
-    const minimumAdvanceSteps = Math.ceil(settings.automaticAdvanceMinimumAmount / MIN_CREDIT_AMOUNT);
-    const maximumAdvanceSteps = Math.floor(maximumAdvance / MIN_CREDIT_AMOUNT);
-    const canAdvanceFullCredit = settings.automaticAdvanceMode === 'credit_amount';
-    if (!current || amount < settings.automaticCreditMinimumAmount || amount > capacity
-      || (canAdvanceFullCredit ? amount > savingsSpaceForAdvance : maximumAdvanceSteps < minimumAdvanceSteps)) {
+    if (!current || amount < settings.automaticCreditMinimumAmount || amount > capacity) {
       return deferAutomaticCreditApproval(application, approvalAt);
     }
-    const advanceAmount = canAdvanceFullCredit
-      ? amount
-      : randomIntegerBetween(minimumAdvanceSteps, maximumAdvanceSteps) * MIN_CREDIT_AMOUNT;
     const date = new Date(approvalAt).toISOString();
     const card = current.card;
+    if (!card) return deferAutomaticCreditApproval(application, approvalAt);
     card.pendingDisbursements = Array.isArray(card.pendingDisbursements) ? card.pendingDisbursements : [];
     application.disbursedAt = date;
     card.funds = roundMoney(card.funds + amount);
@@ -319,35 +352,61 @@
       const [ownEntry] = card.pendingDisbursements.splice(entryIndex, 1);
       card.pendingDisbursements.unshift(ownEntry);
     }
-    application.lastAdvancedAt = date;
-    const activation = activatePendingCardDisbursements(accountId, advanceAmount, application.termMonths, date);
-    if (!activation.ok || activation.activatedAmount !== advanceAmount) {
-      card.funds = roundMoney(card.funds - amount);
-      card.pendingDisbursements = card.pendingDisbursements.filter((entry) => entry.applicationId !== application.id);
-      application.cardFundsRemaining = 0;
-      application.activatedAmount = 0;
-      application.loanId = null;
-      application.lastAdvancedAt = null;
-      application.status = 'En revisión';
-      application.disbursedAt = null;
-      application.reviewerName = null;
-      application.reviewerDecision = null;
-      application.reviewerNote = '';
-      application.reviewedAt = null;
-      return deferAutomaticCreditApproval(application, approvalAt);
-    }
 
     application.reviewerName = REVIEWER_NAME;
     application.reviewerDecision = 'Aprobado';
-    application.reviewerNote = 'Aprobación automática; el monto de crédito y el avance siguen la configuración de la simulación.';
+    application.reviewerNote = 'Aprobación automática. Los fondos están en la tarjeta; el avance se realizará tras la espera configurada.';
     application.reviewedAt = date;
     application.disbursedAt = date;
     application.autoApprovedAt = date;
     application.autoApprovalAt = date;
+    application.autoAdvanceEnabled = true;
+    application.autoAdvanceAt = new Date(approvalAt + settings.automaticAdvanceDelaySeconds * 1000).toISOString();
+    application.autoAdvanceDeferredAt = null;
     application.autoAdvanceIssue = null;
-    application.status = Number(application.cardFundsRemaining) > 0 ? 'Aprobado' : 'Desembolsado';
+    application.status = 'Aprobado';
     recordCardMovement(accountId, 'card_disbursement', amount, 'Desembolso automático cargado a la tarjeta', 'in', date);
     recordMovement(accountId, 'card_disbursement', amount, 'Desembolso automático acreditado a la tarjeta', null, date);
+    recordAuditEvent('Crédito aprobado y desembolsado a tarjeta', {
+      category: 'creditos', accountId, amount, source: 'Analista automático', referenceId: application.id,
+      description: 'Los fondos quedaron en tarjeta. La deuda se activará cuando ocurra el avance automático configurado.',
+      details: { loanActivated: false, cardFundsRemaining: amount, autoAdvanceAt: application.autoAdvanceAt, termMonths: application.termMonths }, date
+    });
+    return true;
+  }
+
+  function advanceApprovedAutomaticCredit(application, advanceAt) {
+    if (!application || application.status !== 'Aprobado' || application.autoAdvancedAt) return false;
+    const accountId = application.accountId;
+    const current = db.accounts?.[accountId];
+    const card = current?.card;
+    const settings = simulationSettingsFor(db);
+    const amount = scheduledAdvanceAmountForApplication(application);
+    if (amount > 0 && Number(application.cardFundsRemaining) !== amount) application.cardFundsRemaining = amount;
+    if (!current || !card || amount <= 0 || card.funds < amount) return deferAutomaticCreditAdvance(application, advanceAt, 'La tarjeta no contiene el total pendiente registrado para este crédito.');
+
+    const savingsSpace = Math.max(0, maxSavingsBalanceForAccount(accountId) - current.balance + ADVANCE_FEE);
+    const maximumAdvance = Math.min(amount, settings.automaticAdvanceMaximumAmount, savingsSpace);
+    const minimumAdvanceSteps = Math.ceil(settings.automaticAdvanceMinimumAmount / MIN_CREDIT_AMOUNT);
+    const maximumAdvanceSteps = Math.floor(maximumAdvance / MIN_CREDIT_AMOUNT);
+    const advanceFullCredit = settings.automaticAdvanceMode === 'credit_amount';
+    if (advanceFullCredit ? amount > savingsSpace : maximumAdvanceSteps < minimumAdvanceSteps) {
+      return deferAutomaticCreditAdvance(application, advanceAt, 'La cuenta no tiene espacio suficiente en ahorros para realizar el avance configurado.');
+    }
+    const advanceAmount = advanceFullCredit
+      ? amount
+      : randomIntegerBetween(minimumAdvanceSteps, maximumAdvanceSteps) * MIN_CREDIT_AMOUNT;
+
+    card.pendingDisbursements = Array.isArray(card.pendingDisbursements) ? card.pendingDisbursements : [];
+    const entryIndex = card.pendingDisbursements.findIndex((entry) => entry.applicationId === application.id);
+    if (entryIndex > 0) {
+      const [ownEntry] = card.pendingDisbursements.splice(entryIndex, 1);
+      card.pendingDisbursements.unshift(ownEntry);
+    }
+    const date = new Date(advanceAt).toISOString();
+    const activation = activatePendingCardDisbursements(accountId, advanceAmount, application.termMonths, date);
+    if (!activation.ok || activation.activatedAmount !== advanceAmount) return deferAutomaticCreditAdvance(application, advanceAt, activation.error || 'No se pudo validar la asignación de los fondos de la tarjeta.');
+
     card.funds = roundMoney(Math.max(0, card.funds - advanceAmount));
     current.balance = roundMoney(current.balance + advanceAmount - ADVANCE_FEE);
     db.advanceFeesCollected = roundMoney((Number(db.advanceFeesCollected) || 0) + ADVANCE_FEE);
@@ -355,11 +414,19 @@
     recordMovement(accountId, 'card_advance', advanceAmount, 'Avance automático de tarjeta recibido en ahorros', 'in', date);
     recordCardMovement(accountId, 'card_advance_fee', ADVANCE_FEE, 'Costo del avance automático', 'out', date);
     recordMovement(accountId, 'card_advance_fee', ADVANCE_FEE, 'Comisión por avance automático', 'out', date);
-    application.autoAdvancedAt = date;
-    recordAuditEvent('Crédito aprobado y avanzado automáticamente', {
-      category: 'creditos', accountId, amount, source: 'Analista automático', referenceId: application.id,
-      description: 'Desembolso acreditado a tarjeta y avance automático a ahorros según la configuración.',
-      details: { loanId: application.loanId, creditAmount: amount, advanceAmount, advanceMode: settings.automaticAdvanceMode, termMonths: application.termMonths, fee: ADVANCE_FEE }, date
+    const remainingFunds = scheduledAdvanceAmountForApplication(application);
+    if (remainingFunds > 0) {
+      application.autoAdvancedAt = null;
+      application.autoAdvanceAt = new Date(advanceAt + settings.automaticAdvanceDelaySeconds * 1000).toISOString();
+    } else {
+      application.autoAdvancedAt = date;
+      application.autoAdvanceAt = null;
+    }
+    application.autoAdvanceIssue = null;
+    recordAuditEvent('Fondos de crédito avanzados automáticamente', {
+      category: 'creditos', accountId, amount: advanceAmount, source: 'Analista automático', referenceId: application.id,
+      description: 'Los fondos pasaron de tarjeta a ahorros tras la espera configurada; el crédito se activó por el importe avanzado.',
+      details: { loanId: application.loanId, creditAmount: amount, advanceAmount, remainingFunds, advanceMode: settings.automaticAdvanceMode, termMonths: application.termMonths, fee: ADVANCE_FEE }, date
     });
     return true;
   }
@@ -400,16 +467,17 @@
     addCandidate('automatic-transfer', db.simulationAutomation.nextAutomaticTransferAt);
     addCandidate('automatic-withdrawal', db.simulationAutomation.nextAutomaticWithdrawalAt);
     addCandidate('treasury-distribution', db.simulationAutomation.nextTreasuryDistributionAt);
-    if (simulationSettingsFor(db).automaticLimitIncreaseApprovalEnabled === true) {
-      (Array.isArray(db.limitIncreaseRequests) ? db.limitIncreaseRequests : []).forEach((request) => {
-        if ((request.status || 'En revisión') === 'En revisión') {
-          addCandidate('limit-increase-approval', request.autoApprovalAt, request);
-        }
-      });
-    }
+    (Array.isArray(db.limitIncreaseRequests) ? db.limitIncreaseRequests : []).forEach((request) => {
+      if ((request.status || 'En revisión') === 'En revisión') {
+        addCandidate('limit-increase-approval', request.autoApprovalAt, request);
+      }
+    });
     (Array.isArray(db.creditApplications) ? db.creditApplications : []).forEach((application) => {
-      if (application?.automaticSimulation === true && (application.status || 'En revisión') === 'En revisión') {
+      if (!automaticAdvanceIsScheduled(application)) return;
+      if ((application.status || 'En revisión') === 'En revisión') {
         addCandidate('credit-approval', application.autoApprovalAt, application);
+      } else if (application.status === 'Aprobado' && scheduledAdvanceAmountForApplication(application) > 0 && !application.autoAdvancedAt) {
+        addCandidate('credit-advance', application.autoAdvanceAt, application);
       }
     });
     (Array.isArray(db.loans) ? db.loans : []).forEach((loan) => {
@@ -417,7 +485,7 @@
         addCandidate('installment', loan.nextAutomaticPaymentAt, loan);
       }
     });
-    const priority = { 'treasury-distribution': 0, 'credit-request': 1, 'limit-increase-request': 2, 'limit-increase-approval': 3, 'credit-approval': 4, installment: 5, 'automatic-transfer': 6, 'automatic-withdrawal': 7 };
+    const priority = { 'treasury-distribution': 0, 'credit-request': 1, 'limit-increase-request': 2, 'limit-increase-approval': 3, 'credit-approval': 4, 'credit-advance': 5, installment: 6, 'automatic-transfer': 7, 'automatic-withdrawal': 8 };
     candidates.sort((left, right) => left.at - right.at || priority[left.type] - priority[right.type]);
     return candidates[0] || null;
   }
@@ -451,7 +519,9 @@
           db.simulationAutomation.nextAutomaticWithdrawalAt = new Date(event.at + simulationSettingsFor(db).automaticWithdrawalIntervalSeconds * 1000).toISOString();
           executeAutomaticWithdrawal(event.at);
         } else if (event.type === 'credit-approval') {
-          approveAndAdvanceAutomaticCredit(event.reference, event.at);
+          approveAutomaticCreditAndDisburse(event.reference, event.at);
+        } else if (event.type === 'credit-advance') {
+          advanceApprovedAutomaticCredit(event.reference, event.at);
         } else if (event.type === 'installment') {
           processAutomaticInstallment(event.reference, event.at);
         }
@@ -501,21 +571,22 @@
       const saved = JSON.parse(lastPersistedRaw);
       if (!saved?.simulationAutomation || !saved.simulationAutomation.nextLimitIncreaseRequestAt
         || !saved.simulationAutomation.nextAutomaticTransferAt || !saved.simulationAutomation.nextAutomaticWithdrawalAt) return true;
+      if (saved.simulationSettings?.automationSafetyPresetVersion !== db.simulationSettings?.automationSafetyPresetVersion
+        || saved.simulationAutomation?.automationSafetyPresetVersion !== db.simulationAutomation?.automationSafetyPresetVersion) return true;
       for (const loan of (Array.isArray(db?.loans) ? db.loans : [])) {
         if (loan.status !== 'Activo' || Number(loan.outstandingPrincipal) <= 0) continue;
         const prior = (Array.isArray(saved.loans) ? saved.loans : []).find((item) => item.id === loan.id);
         if (!prior?.nextAutomaticPaymentAt || !Number.isSafeInteger(prior.automaticPaymentIntervalSeconds) || prior.automaticPaymentIntervalSeconds < 1) return true;
       }
-      if (simulationSettingsFor(db).automaticLimitIncreaseApprovalEnabled === true) {
-        for (const request of (Array.isArray(db?.limitIncreaseRequests) ? db.limitIncreaseRequests : [])) {
-          if ((request.status || 'En revisión') !== 'En revisión') continue;
-          const prior = (Array.isArray(saved.limitIncreaseRequests) ? saved.limitIncreaseRequests : []).find((item) => item.id === request.id);
-          if (!prior?.autoApprovalAt) return true;
-        }
-      }      for (const application of (Array.isArray(db?.creditApplications) ? db.creditApplications : [])) {
-        if (application.automaticSimulation !== true || (application.status || 'En revisión') !== 'En revisión') continue;
-        const prior = (Array.isArray(saved.creditApplications) ? saved.creditApplications : []).find((item) => item.id === application.id);
+      for (const request of (Array.isArray(db?.limitIncreaseRequests) ? db.limitIncreaseRequests : [])) {
+        if ((request.status || 'En revisión') !== 'En revisión') continue;
+        const prior = (Array.isArray(saved.limitIncreaseRequests) ? saved.limitIncreaseRequests : []).find((item) => item.id === request.id);
         if (!prior?.autoApprovalAt) return true;
+      }      for (const application of (Array.isArray(db?.creditApplications) ? db.creditApplications : [])) {
+        if (!automaticAdvanceIsScheduled(application)) continue;
+        const prior = (Array.isArray(saved.creditApplications) ? saved.creditApplications : []).find((item) => item.id === application.id);
+        if ((application.status || 'En revisión') === 'En revisión' && !prior?.autoApprovalAt) return true;
+        if (application.status === 'Aprobado' && scheduledAdvanceAmountForApplication(application) > 0 && !application.autoAdvancedAt && !prior?.autoAdvanceAt) return true;
       }
       return false;
     } catch (error) {
@@ -531,18 +602,19 @@
     db.simulationAutomation.nextTreasuryDistributionAt = new Date(now + settings.treasuryDistributionIntervalSeconds * 1000).toISOString();
     (Array.isArray(db.limitIncreaseRequests) ? db.limitIncreaseRequests : []).forEach((request) => {
       if ((request.status || 'En revisión') !== 'En revisión') return;
-      request.autoApprovalAt = settings.automaticLimitIncreaseApprovalEnabled === true
-        ? new Date(now + settings.automaticLimitIncreaseApprovalDelaySeconds * 1000).toISOString()
-        : null;
+      request.autoApprovalAt = new Date(now + settings.automaticLimitIncreaseApprovalDelaySeconds * 1000).toISOString();
     });
     (Array.isArray(db.creditApplications) ? db.creditApplications : []).forEach((application) => {
-      if (application?.automaticSimulation === true && (application.status || 'En revisión') === 'En revisión') {
+      if (application.automaticSimulation === true && (application.status || 'En revisión') === 'En revisión') {
         application.autoApprovalAt = new Date(now + settings.automaticCreditApprovalDelaySeconds * 1000).toISOString();
+      } else if (application.status === 'Aprobado' && scheduledAdvanceAmountForApplication(application) > 0 && !application.autoAdvancedAt) {
+        application.autoAdvanceEnabled = true;
+        application.autoAdvanceAt = new Date(now + settings.automaticAdvanceDelaySeconds * 1000).toISOString();
       }
     });
     (Array.isArray(db.loans) ? db.loans : []).forEach((loan) => {
       if (loan?.status !== 'Activo' || Number(loan.outstandingPrincipal) <= 0) return;
-      loan.automaticPaymentIntervalSeconds = automaticPaymentIntervalForTerm(loan.termMonths);
+      loan.automaticPaymentIntervalSeconds = automaticPaymentIntervalForTerm(loan.termMonths, db, loan.paymentScheduleType);
       loan.nextAutomaticPaymentAt = new Date(now + loan.automaticPaymentIntervalSeconds * 1000).toISOString();
     });
     if (db.withdrawalTreasury) db.withdrawalTreasury.lastAccruedAt = new Date(now).toISOString();

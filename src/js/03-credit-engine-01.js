@@ -37,7 +37,8 @@
     const term = VALID_CREDIT_TERMS.includes(Number(application.termMonths)) ? Number(application.termMonths) : 12;
     const estimate = calculateCreditEstimate(application.amount, term, rate);
     const disbursedAt = application.lastAdvancedAt || application.disbursedAt || new Date().toISOString();
-    const intervalSeconds = automaticPaymentIntervalForTerm(term);
+    const paymentScheduleType = application.paymentScheduleType === 'credit' ? 'credit' : 'advance';
+    const intervalSeconds = automaticPaymentIntervalForTerm(term, db, paymentScheduleType);
     return {
       id: createId(),
       applicationId: application.id,
@@ -48,6 +49,7 @@
       outstandingPrincipal: roundMoney(application.amount),
       monthlyRate: rate,
       termMonths: term,
+      paymentScheduleType,
       monthlyPayment: roundMoney(estimate.monthlyPayment),
       installmentsPaid: 0,
       automaticPaymentIntervalSeconds: intervalSeconds,

@@ -2,7 +2,7 @@
     const amount = roundMoney(application.amount);
     let loan = (db.loans || []).find((item) => item.accountId === application.accountId && item.status === 'Activo' && Number(item.outstandingPrincipal) > 0);
     if (!loan) {
-      loan = createLoanFromApplication(application);
+      loan = createLoanFromApplication({ ...application, paymentScheduleType: 'advance' });
       db.loans.unshift(loan);
       return loan;
     }
@@ -16,6 +16,7 @@
     loan.applicationIds = Array.from(new Set([...(Array.isArray(loan.applicationIds) ? loan.applicationIds : []), ...(loan.applicationId ? [loan.applicationId] : []), application.id].filter(Boolean)));
     loan.applicationId = loan.applicationId || application.id;
     loan.source = 'Crédito unificado';
+    loan.paymentScheduleType = 'advance';
     const selectedAdvanceTerm = Number(application.termMonths);
     const requestedTerm = application.origin === 'Aumento de cupo'
       ? 12
@@ -107,7 +108,7 @@
       const termMonths = sourceApplication.origin === 'Aumento de cupo'
         ? 12
         : (VALID_CARD_ADVANCE_TERMS.includes(Number(selectedTermMonths)) ? Number(selectedTermMonths) : 12);
-      const loan = addOriginalDisbursementToUnifiedDebt({ ...sourceApplication, amount: activatedAmount, termMonths });
+      const loan = addOriginalDisbursementToUnifiedDebt({ ...sourceApplication, lastAdvancedAt: advancedAt, amount: activatedAmount, termMonths });
       entry.remainingAmount = roundMoney(Math.max(0, Number(entry.remainingAmount) - activatedAmount));
       sourceApplication.activatedAmount = roundMoney((Number(sourceApplication.activatedAmount) || 0) + activatedAmount);
       sourceApplication.cardFundsRemaining = roundMoney(Math.max(0, (Number(sourceApplication.cardFundsRemaining) || 0) - activatedAmount));

@@ -25,18 +25,20 @@ const db = {
 const context = {
   db,
   reviewerSession: true,
-  simulationSettingsFor: (database) => ({ analystCapital: 500000000, ...(database.simulationSettings || {}) }),
+  simulationSettingsFor: (database) => ({ analystCapital: 500000000, automaticAdvanceDelaySeconds: 1, ...(database.simulationSettings || {}) }),
   MAX_CARD_FUNDS: 100000000,
   MAX_CARD_LIMIT: 500000000,
   ANALYST_TOTAL_CAPITAL: 500000000,
   ILLUSTRATIVE_MONTHLY_RATE: 0.02, currentMonthlyInterestRate: () => 0.02,
-  VALID_CREDIT_TERMS: [6, 12],
-  VALID_CARD_ADVANCE_TERMS: [6, 12],
+  VALID_CREDIT_TERMS: [6, 12, 18, 24, 30, 36, 42, 48, 54, 60],
+  VALID_CARD_ADVANCE_TERMS: [6, 12, 18, 24, 30, 36, 42, 48, 54, 60],
   REVIEWER_NAME: 'Analista',
   roundMoney: (amount) => Math.round(Number(amount) || 0),
   createId: () => `generated-${nextId++}`,
   calculateCreditEstimate: (amount, termMonths) => ({ monthlyPayment: Math.round(amount / termMonths), totalPayable: amount, totalInterest: 0 }),
   createLoanFromApplication(application) {
+    const disbursedAt = application.lastAdvancedAt || application.disbursedAt || new Date().toISOString();
+    const automaticPaymentIntervalSeconds = application.termMonths === 6 ? 300 : 180;
     return {
       id: `loan-${nextId++}`,
       applicationId: application.id,
@@ -49,6 +51,8 @@ const context = {
       monthlyRate: 0.02,
       termMonths: application.termMonths,
       monthlyPayment: application.monthlyPayment,
+      automaticPaymentIntervalSeconds,
+      nextAutomaticPaymentAt: new Date(Date.parse(disbursedAt) + automaticPaymentIntervalSeconds * 1000).toISOString(),
       installmentsPaid: 0,
       status: 'Activo',
       source: 'Crédito unificado',
@@ -84,11 +88,14 @@ for (const file of ['03-credit-engine-03.js', '03-credit-engine-04.js', '06-anal
   assert(personalApplication.status === 'Aprobado' && personalApplication.cardFundsRemaining === 25000000, 'La solicitud debe indicar fondos cargados sin crédito activo.');
   assert(context.availableAnalystCapital() === 475000000, 'El capital en tarjeta debe quedar comprometido para el analista.');
 
-  let activation = context.activatePendingCardDisbursements(1, 5000000, 60);
+  personalApplication.disbursedAt = '2026-10-22T10:00:00.000Z';
+  const firstAdvanceAt = '2026-10-22T10:10:00.000Z';
+  let activation = context.activatePendingCardDisbursements(1, 5000000, 60, firstAdvanceAt);
   assert(activation.ok && activation.activatedAmount === 5000000, 'El primer avance debe activar solo el importe trasladado.');
   db.accounts[1].card.funds -= 5000000;
   assert(db.loans.length === 1 && db.loans[0].outstandingPrincipal === 5000000, 'El primer avance debe crear crédito por su importe exacto.');
-  assert(db.loans[0].termMonths === 12, 'Un plazo de avance no permitido debe ajustarse a uno permitido (12).');
+  assert(db.loans[0].termMonths === 60, 'Los avances deben aceptar plazos de hasta 60 cuotas.' );
+  assert(db.loans[0].nextAutomaticPaymentAt === '2026-10-22T10:13:00.000Z', 'La primera cuota debe programarse desde el momento real del avance, no desde el desembolso anterior a la espera automática.');
   assert(personalApplication.cardFundsRemaining === 20000000 && personalApplication.status === 'Aprobado', 'El saldo restante debe permanecer en tarjeta sin cuotas.');
 
   activation = context.activatePendingCardDisbursements(1, 1000000, 6);
@@ -116,7 +123,7 @@ for (const file of ['03-credit-engine-03.js', '03-credit-engine-04.js', '06-anal
 
   console.log('PASS: los desembolsos personales y los aumentos solo crean crédito cuando se avanza.');
   console.log('PASS: los fondos pendientes siguen en tarjeta y restan del capital disponible.');
-  console.log('PASS: el avance personal respeta 6 o 12 cuotas y los aumentos de cupo conservan 12 meses.');
+  console.log('PASS: los avances personales permiten hasta 60 cuotas y los aumentos de cupo conservan 12 meses.');
 })().catch((error) => {
   console.error(error.stack || error);
   process.exitCode = 1;

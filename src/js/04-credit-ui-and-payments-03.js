@@ -1,7 +1,7 @@
   function automaticPaymentIntervalForLoan(loan) {
     const savedInterval = Number(loan?.automaticPaymentIntervalSeconds);
     if (Number.isSafeInteger(savedInterval) && savedInterval >= 1 && savedInterval <= 31536000) return savedInterval;
-    return automaticPaymentIntervalForTerm(loan?.termMonths);
+    return automaticPaymentIntervalForTerm(loan?.termMonths, db, loan?.paymentScheduleType);
   }
 
   function applyInstallmentPayment(loan, current, installment, paymentDate = new Date().toISOString()) {

@@ -3,7 +3,7 @@
     const confirmed = await showAppDialog({
       type: 'confirm',
       title: 'Borrar todos los datos del sistema',
-      message: 'Esta acción eliminará los saldos y todos los registros guardados del cajero: movimientos, solicitudes, créditos, desembolsos, cuotas, abonos e intereses acumulados. Las tres cuentas de prueba y sus PIN se conservarán para poder volver a entrar, pero quedarán en $ 0 y sin historial. La Tesorería también se reiniciará a $ 0 y su cronómetro empezará de nuevo. Esta acción no se puede deshacer.',
+      message: 'Esta acción eliminará los saldos y todos los registros guardados del cajero: movimientos, solicitudes, créditos, desembolsos, cuotas, abonos e intereses acumulados. Las tres cuentas de prueba y sus PIN se conservarán para poder volver a entrar, pero quedarán en $ 0 y sin historial. La Tesorería también se reiniciará a $ 0 y su cronómetro empezará de nuevo. La copia independiente de configuración se conservará y se aplicará al sistema limpio. Esta acción no se puede deshacer.',
       eyebrow: 'BORRADO TOTAL · ACCIÓN IRREVERSIBLE',
       icon: '!',
       confirmText: 'Borrar todos los datos',
@@ -48,7 +48,7 @@
     pinInput.value = '';
     reviewerPinInput.value = '';
     showToast(resetSaved
-      ? 'Todos los datos operativos fueron borrados. Las tres cuentas y la Tesorería quedaron en $ 0 y sin historial.'
+      ? 'Todos los datos operativos fueron borrados. Las tres cuentas y la Tesorería quedaron en $ 0 y sin historial; la configuración guardada se conservó.'
       : 'Los datos anteriores fueron borrados. El navegador no pudo guardar el estado inicial; vuelve a abrir la página para iniciar una demostración limpia.', resetSaved ? 'success' : 'warning');
     accountSelect.focus();
   }

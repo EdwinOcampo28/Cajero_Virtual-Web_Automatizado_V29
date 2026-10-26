@@ -68,7 +68,7 @@
     if (!reviewerSession || !reviewerApplicationsList) return;
     const selectedClientId = getReviewerSelectedClientId();
     const allApplications = (Array.isArray(db.creditApplications) ? db.creditApplications : [])
-      .filter((item) => item.origin !== 'Aumento de cupo' || Number(item.activatedAmount) > 0)
+      .filter((item) => item.origin !== 'Aumento de cupo')
       .filter((item) => selectedClientId === null || Number(item.accountId) === selectedClientId);
     const filter = reviewerFilter.value;
     const applications = allApplications.filter((item) => {
@@ -99,9 +99,7 @@
       applicant.append(name, accountLine);
       const status = document.createElement('span');
       status.className = `credit-status ${statusClass(item.status || 'En revisión')}`;
-      status.textContent = Number(item.cardFundsRemaining) > 0
-        ? (Number(item.activatedAmount) > 0 ? 'Avance parcial' : 'Fondos en tarjeta · sin crédito activo')
-        : (item.status || 'En revisión');
+      status.textContent = item.status || 'En revisión';
       heading.append(applicant, requested, status);
 
       const details = document.createElement('div');
@@ -119,7 +117,6 @@
         ['Total estimado de la solicitud', money(item.totalPayable || 0)],
         ['Fecha de solicitud', shortDateTime(item.date)],
         ...(Number(item.cardFundsRemaining) > 0 ? [['Fondos aún en tarjeta', money(item.cardFundsRemaining)]] : []),
-        ...(Number(item.activatedAmount) > 0 ? [['Crédito activado por avances', money(item.activatedAmount)]] : []),
         ...(Number(item.cardFundsRemaining) > 0 ? [['Estado de cuotas', 'No se generan sobre fondos aún no avanzados']] : []),
         ...(liveSnapshot?.outstandingDebt > 0 ? [['Capital/deuda pendiente actual', money(liveSnapshot.outstandingDebt)]] : []),
         ...(relatedLoan ? [['Cuota vigente', money(relatedLoan.monthlyPayment || item.monthlyPayment || 0)], ['Estado del crédito', relatedLoan.status], ['Cuotas pagadas', `${relatedLoan.installmentsPaid || 0} de ${relatedLoan.termMonths || item.termMonths || 0}`]] : [])

@@ -7,14 +7,19 @@
       treasuryTimerIncomeCap: TREASURY_TIMER_INCOME_CAP,
       creditRequestIntervalSeconds: SIMULATION_HOUR_MS / 1000,
       automaticCreditApprovalDelaySeconds: SIMULATION_APPROVAL_DELAY_MS / 1000,
+      automaticAdvanceDelaySeconds: 30,
+      automaticAnalystCapitalReserve: 500000000,
+      automationSafetyPresetVersion: 1,
       automaticLimitIncreaseApprovalEnabled: true,
       automaticLimitIncreaseApprovalDelaySeconds: SIMULATION_APPROVAL_DELAY_MS / 1000,
       automaticTransferIntervalSeconds: SIMULATION_HOUR_MS / 1000,
       automaticWithdrawalIntervalSeconds: SIMULATION_HOUR_MS / 1000,
-      limitIncreaseRequestIntervalSeconds: SIMULATION_HOUR_MS / 1000,
+      limitIncreaseRequestIntervalSeconds: 24 * SIMULATION_HOUR_MS / 1000,
       treasuryDistributionIntervalSeconds: SIMULATION_HOUR_MS / 1000,
       paymentInterval6Seconds: AUTOMATIC_PAYMENT_INTERVAL_MS[6] / 1000,
       paymentInterval12Seconds: AUTOMATIC_PAYMENT_INTERVAL_MS[12] / 1000,
+      advancePaymentInterval6Seconds: AUTOMATIC_PAYMENT_INTERVAL_MS[6] / 1000,
+      advancePaymentInterval12Seconds: AUTOMATIC_PAYMENT_INTERVAL_MS[12] / 1000,
       automaticCreditMinimumAmount: MIN_CREDIT_AMOUNT,
       automaticCreditMaximumAmount: MAX_CREDIT_AMOUNT,
       automaticAdvanceMinimumAmount: MIN_CREDIT_AMOUNT,
@@ -24,46 +29,77 @@
     };
   }
 
-  function freshSimulationAutomation(now = Date.now()) {
-    const firstRun = new Date(now + SIMULATION_HOUR_MS).toISOString();
-    return { nextCreditRequestAt: firstRun, nextLimitIncreaseRequestAt: firstRun, nextTreasuryDistributionAt: firstRun, nextAutomaticTransferAt: firstRun, nextAutomaticWithdrawalAt: firstRun, paused: false, pausedAt: null };
+  function freshSimulationAutomation(now = Date.now(), settings = freshSimulationSettings()) {
+    const nextAt = (seconds) => new Date(now + seconds * 1000).toISOString();
+    return {
+      nextCreditRequestAt: nextAt(settings.creditRequestIntervalSeconds),
+      nextLimitIncreaseRequestAt: nextAt(settings.limitIncreaseRequestIntervalSeconds),
+      nextTreasuryDistributionAt: nextAt(settings.treasuryDistributionIntervalSeconds),
+      nextAutomaticTransferAt: nextAt(settings.automaticTransferIntervalSeconds),
+      nextAutomaticWithdrawalAt: nextAt(settings.automaticWithdrawalIntervalSeconds),
+      paused: false, pausedAt: null, automationSafetyPresetVersion: 1
+    };
   }
 
   function normalizeSimulationAutomation(database, now = Date.now()) {
     if (!database || typeof database !== 'object') return null;
     const saved = database.simulationAutomation;
     if (saved !== undefined && (!saved || typeof saved !== 'object' || Array.isArray(saved))) return null;
+    const applySafetyPreset = saved?.automationSafetyPresetVersion !== 1;
     const automation = { ...freshSimulationAutomation(now), ...(saved || {}) };
+    if (applySafetyPreset) {
+      const settings = simulationSettingsFor(database);
+      automation.nextCreditRequestAt = new Date(now + settings.creditRequestIntervalSeconds * 1000).toISOString();
+      automation.nextLimitIncreaseRequestAt = new Date(now + settings.limitIncreaseRequestIntervalSeconds * 1000).toISOString();
+      automation.nextTreasuryDistributionAt = new Date(now + settings.treasuryDistributionIntervalSeconds * 1000).toISOString();
+      automation.nextAutomaticTransferAt = new Date(now + settings.automaticTransferIntervalSeconds * 1000).toISOString();
+      automation.nextAutomaticWithdrawalAt = new Date(now + settings.automaticWithdrawalIntervalSeconds * 1000).toISOString();
+      automation.paused = false;
+      automation.pausedAt = null;
+      automation.automationSafetyPresetVersion = 1;
+    }
     if (typeof automation.paused !== 'boolean') return null;
     if (automation.pausedAt !== null && (typeof automation.pausedAt !== 'string' || !Number.isFinite(Date.parse(automation.pausedAt)))) return null;
     for (const key of ['nextCreditRequestAt', 'nextLimitIncreaseRequestAt', 'nextTreasuryDistributionAt', 'nextAutomaticTransferAt', 'nextAutomaticWithdrawalAt']) {
       if (typeof automation[key] !== 'string' || !Number.isFinite(Date.parse(automation[key]))) return null;
     }
+    automation.automationSafetyPresetVersion = 1;
     database.simulationAutomation = automation;
     if (!Array.isArray(database.loans)) return automation;
     for (const loan of database.loans) {
-      if (!loan || loan.status !== 'Activo' || Number(loan.outstandingPrincipal) <= 0) continue;
-      const interval = automaticPaymentIntervalForTerm(loan.termMonths, database);
+      if (!loan) continue;
+      if (!['advance', 'credit'].includes(loan.paymentScheduleType)) loan.paymentScheduleType = 'advance';
+      if (loan.status !== 'Activo' || Number(loan.outstandingPrincipal) <= 0) continue;
+      const interval = automaticPaymentIntervalForTerm(loan.termMonths, database, loan.paymentScheduleType);
       const legacyMinutes = Number(loan.automaticPaymentIntervalMinutes);
-      if (!Number.isSafeInteger(loan.automaticPaymentIntervalSeconds) || loan.automaticPaymentIntervalSeconds < 1 || loan.automaticPaymentIntervalSeconds > 31536000) {
-        loan.automaticPaymentIntervalSeconds = Number.isSafeInteger(legacyMinutes) && legacyMinutes >= 1 && legacyMinutes <= 525600 ? legacyMinutes * 60 : interval;
+      if (applySafetyPreset || !Number.isSafeInteger(loan.automaticPaymentIntervalSeconds) || loan.automaticPaymentIntervalSeconds < 1 || loan.automaticPaymentIntervalSeconds > 31536000) {
+        loan.automaticPaymentIntervalSeconds = interval;
       }
       delete loan.automaticPaymentIntervalMinutes;
-      if (typeof loan.nextAutomaticPaymentAt !== 'string' || !Number.isFinite(Date.parse(loan.nextAutomaticPaymentAt))) {
+      if (applySafetyPreset || typeof loan.nextAutomaticPaymentAt !== 'string' || !Number.isFinite(Date.parse(loan.nextAutomaticPaymentAt))) {
         loan.nextAutomaticPaymentAt = new Date(now + loan.automaticPaymentIntervalSeconds * 1000).toISOString();
       }
     }
     for (const request of (Array.isArray(database.limitIncreaseRequests) ? database.limitIncreaseRequests : [])) {
       if ((request.status || 'En revisión') === 'En revisión'
-        && database.simulationSettings?.automaticLimitIncreaseApprovalEnabled === true
-        && (typeof request.autoApprovalAt !== 'string' || !Number.isFinite(Date.parse(request.autoApprovalAt)))) {
+        && (applySafetyPreset || typeof request.autoApprovalAt !== 'string' || !Number.isFinite(Date.parse(request.autoApprovalAt)))) {
         request.autoApprovalAt = new Date(now + simulationSettingsFor(database).automaticLimitIncreaseApprovalDelaySeconds * 1000).toISOString();
       }
     }
     for (const application of (Array.isArray(database.creditApplications) ? database.creditApplications : [])) {
       if (application?.automaticSimulation === true
-        && (typeof application.autoApprovalAt !== 'string' || !Number.isFinite(Date.parse(application.autoApprovalAt)))) {
+        && (application.status || 'En revisión') === 'En revisión'
+        && (applySafetyPreset || typeof application.autoApprovalAt !== 'string' || !Number.isFinite(Date.parse(application.autoApprovalAt)))) {
         application.autoApprovalAt = new Date(now + simulationSettingsFor(database).automaticCreditApprovalDelaySeconds * 1000).toISOString();
+      }
+      const pendingEntry = database.accounts?.[application.accountId]?.card?.pendingDisbursements?.find((entry) => entry.applicationId === application.id);
+      const pendingAmount = Math.max(Number(application.cardFundsRemaining) || 0, Number(pendingEntry?.remainingAmount) || 0);
+      if (application.status === 'Aprobado' && pendingAmount > 0 && !application.autoAdvancedAt) {
+        application.cardFundsRemaining = pendingAmount;
+        application.autoAdvanceEnabled = true;
+        if (applySafetyPreset || typeof application.autoAdvanceAt !== 'string' || !Number.isFinite(Date.parse(application.autoAdvanceAt))) {
+          application.autoAdvanceAt = new Date(now + simulationSettingsFor(database).automaticAdvanceDelaySeconds * 1000).toISOString();
+        }
       }
     }
     return automation;
@@ -81,7 +117,29 @@
       // La tarifa nueva debe empezar al actualizar/importar, sin recalcular el tiempo antiguo.
       database.withdrawalTreasury.lastAccruedAt = new Date().toISOString();
     }
+    const applySafetyPreset = saved?.automationSafetyPresetVersion !== 1;
     const settings = { ...freshSimulationSettings(), ...(saved || {}) };
+    if (applySafetyPreset) {
+      Object.assign(settings, {
+        creditRequestIntervalSeconds: 3600,
+        automaticCreditApprovalDelaySeconds: 60,
+        automaticAdvanceDelaySeconds: 30,
+        limitIncreaseRequestIntervalSeconds: 86400,
+        automaticLimitIncreaseApprovalDelaySeconds: 60,
+        paymentInterval6Seconds: 300,
+        paymentInterval12Seconds: 180,
+        advancePaymentInterval6Seconds: 300,
+        advancePaymentInterval12Seconds: 180,
+        treasuryDistributionIntervalSeconds: 3600,
+        automaticTransferIntervalSeconds: 3600,
+        automaticWithdrawalIntervalSeconds: 3600,
+        automaticAnalystCapitalReserve: 500000000,
+        automationSafetyPresetVersion: 1
+      });
+    }
+    // Los aumentos de cupo siempre se aprueban automáticamente; el analista controla la espera arriba.
+    settings.automaticLimitIncreaseApprovalEnabled = true;
+    settings.automationSafetyPresetVersion = 1;
     const legacyIntervals = [
       ['creditRequestIntervalSeconds', 'creditRequestIntervalMinutes'],
       ['limitIncreaseRequestIntervalSeconds', 'limitIncreaseRequestIntervalMinutes'],
@@ -89,18 +147,22 @@
       ['automaticWithdrawalIntervalSeconds', 'automaticWithdrawalIntervalMinutes'],
       ['treasuryDistributionIntervalSeconds', 'treasuryDistributionIntervalMinutes'],
       ['paymentInterval6Seconds', 'paymentInterval6Minutes'],
-      ['paymentInterval12Seconds', 'paymentInterval12Minutes']
+      ['paymentInterval12Seconds', 'paymentInterval12Minutes'],
+      ['advancePaymentInterval6Seconds', 'advancePaymentInterval6Minutes'],
+      ['advancePaymentInterval12Seconds', 'advancePaymentInterval12Minutes']
     ];
     legacyIntervals.forEach(([secondsKey, minutesKey]) => {
-      if (!Number.isSafeInteger(saved?.[secondsKey]) && Number.isSafeInteger(saved?.[minutesKey]) && saved[minutesKey] >= 1) {
+      if (!applySafetyPreset && !Number.isSafeInteger(saved?.[secondsKey]) && Number.isSafeInteger(saved?.[minutesKey]) && saved[minutesKey] >= 1) {
         settings[secondsKey] = saved[minutesKey] * 60;
       }
       delete settings[minutesKey];
     });
+    if (!Number.isSafeInteger(saved?.advancePaymentInterval6Seconds) && !Number.isSafeInteger(saved?.advancePaymentInterval6Minutes)) settings.advancePaymentInterval6Seconds = settings.paymentInterval6Seconds;
+    if (!Number.isSafeInteger(saved?.advancePaymentInterval12Seconds) && !Number.isSafeInteger(saved?.advancePaymentInterval12Minutes)) settings.advancePaymentInterval12Seconds = settings.paymentInterval12Seconds;
     settings.treasuryTimerIncomeCap = Number.MAX_SAFE_INTEGER;
     settings.analystCapital = Number.isSafeInteger(settings.analystCapital) ? settings.analystCapital : ANALYST_TOTAL_CAPITAL;
     settings.limitIncreaseAmount = Number.isSafeInteger(settings.limitIncreaseAmount) ? settings.limitIncreaseAmount : DEFAULT_LIMIT_INCREASE_AMOUNT;
-    const intervals = [settings.automaticCreditApprovalDelaySeconds, settings.automaticLimitIncreaseApprovalDelaySeconds, settings.creditRequestIntervalSeconds, settings.limitIncreaseRequestIntervalSeconds, settings.treasuryDistributionIntervalSeconds, settings.automaticTransferIntervalSeconds, settings.automaticWithdrawalIntervalSeconds, settings.paymentInterval6Seconds, settings.paymentInterval12Seconds];
+    const intervals = [settings.automaticCreditApprovalDelaySeconds, settings.automaticAdvanceDelaySeconds, settings.automaticLimitIncreaseApprovalDelaySeconds, settings.creditRequestIntervalSeconds, settings.limitIncreaseRequestIntervalSeconds, settings.treasuryDistributionIntervalSeconds, settings.automaticTransferIntervalSeconds, settings.automaticWithdrawalIntervalSeconds, settings.paymentInterval6Seconds, settings.paymentInterval12Seconds, settings.advancePaymentInterval6Seconds, settings.advancePaymentInterval12Seconds];
     const creditAmounts = [settings.automaticCreditMinimumAmount, settings.automaticCreditMaximumAmount];
     const advanceAmounts = [settings.automaticAdvanceMinimumAmount, settings.automaticAdvanceMaximumAmount];
     const validMoneyRange = (values) => values.every((amount) => Number.isSafeInteger(amount)
@@ -109,8 +171,8 @@
       || !Number.isSafeInteger(settings.treasuryTimerRate) || settings.treasuryTimerRate < 1
       || !Number.isSafeInteger(settings.treasuryTimerIncomeCap) || settings.treasuryTimerIncomeCap < 0
       || !Number.isSafeInteger(settings.analystCapital) || settings.analystCapital < 0
+      || !Number.isSafeInteger(settings.automaticAnalystCapitalReserve) || settings.automaticAnalystCapitalReserve < 0
       || !Number.isSafeInteger(settings.limitIncreaseAmount) || settings.limitIncreaseAmount < MIN_CREDIT_AMOUNT || settings.limitIncreaseAmount % MIN_CREDIT_AMOUNT !== 0
-      || typeof settings.automaticLimitIncreaseApprovalEnabled !== 'boolean'
       || intervals.some((seconds) => !Number.isSafeInteger(seconds) || seconds < 1 || seconds > 31536000)
       || !validMoneyRange(creditAmounts) || settings.automaticCreditMinimumAmount > settings.automaticCreditMaximumAmount
       || !validMoneyRange(advanceAmounts) || settings.automaticAdvanceMinimumAmount > settings.automaticAdvanceMaximumAmount
@@ -122,8 +184,11 @@
     return settings;
   }
 
-  function automaticPaymentIntervalForTerm(termMonths, database = db) {
+  function automaticPaymentIntervalForTerm(termMonths, database = db, scheduleType = 'credit') {
     const settings = simulationSettingsFor(database);
+    if (scheduleType === 'advance') {
+      return Number(termMonths) <= 6 ? settings.advancePaymentInterval6Seconds : settings.advancePaymentInterval12Seconds;
+    }
     return Number(termMonths) <= 6 ? settings.paymentInterval6Seconds : settings.paymentInterval12Seconds;
   }
 
@@ -136,6 +201,10 @@
   }
 
   function freshDatabase() {
+    const savedConfiguration = typeof readSavedSimulationConfiguration === 'function'
+      ? readSavedSimulationConfiguration()
+      : null;
+    const simulationSettings = { ...freshSimulationSettings(), ...(savedConfiguration?.settings || {}) };
     return {
       accounts: ACCOUNT_SEED.map((seed) => seed ? {
         ...seed,
@@ -149,8 +218,8 @@
       operationFeesCollected: 0,
       limitIncreaseRequests: [],
       auditLog: [],
-      simulationSettings: freshSimulationSettings(),
-      simulationAutomation: freshSimulationAutomation(),
+      simulationSettings,
+      simulationAutomation: freshSimulationAutomation(Date.now(), simulationSettings),
       withdrawalTreasury: freshWithdrawalTreasury()
     };
   }

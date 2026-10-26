@@ -92,6 +92,8 @@
       }
       recordCardMovement(application.accountId, 'card_disbursement', application.amount, 'Desembolso cargado a fondos de tarjeta; crédito pendiente de avance', 'in');
       application.status = 'Aprobado';
+      application.autoAdvanceEnabled = true;
+      application.autoAdvanceAt = new Date(Date.now() + simulationSettingsFor(db).automaticAdvanceDelaySeconds * 1000).toISOString();
       application.reviewerDecision = 'Aprobado';
       application.loanId = null;
       recordMovement(application.accountId, 'card_disbursement', application.amount, 'Desembolso acreditado a fondos de tarjeta; aún no activa crédito ni cuotas', null);

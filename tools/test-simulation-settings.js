@@ -15,20 +15,23 @@ const ensure = (id, value = '') => {
 };
 [
   ['simulationSettingsForm', ''], ['simulationMonthlyRateInput', '2'], ['simulationTreasuryRateInput', '1000'],
-  ['simulationLimitIncreaseAmountInput', '50000000'], ['simulationAnalystCapitalInput', '2000000000'],
+  ['simulationLimitIncreaseAmountInput', '50000000'], ['simulationAnalystCapitalInput', '2000000000'], ['simulationAnalystReserveInput', '500000000'],
   ['simulationCreditMinimumInput', '100000'], ['simulationCreditMaximumInput', '100000000'],
   ['simulationAdvanceMinimumInput', '100000'], ['simulationAdvanceMaximumInput', '100000000'],
   ['simulationAdvanceModeSelect', 'credit_amount'], ['simulationCreditTermSelect', '0'],
-  ['simulationLimitIncreaseApprovalSelect', 'true'], ['simulationSettingsStatus', ''],
+  ['simulationSettingsStatus', ''],
   ['simulationAnalystCapitalStatus', ''], ['saveAnalystCapitalButton', '']
 ].forEach(([id, value]) => ensure(id, value));
 const intervalControls = [
   ['simulationCreditRequestIntervalInput', '3600', 'simulationCreditRequestIntervalUnit'],
   ['simulationCreditApprovalDelayInput', '60', 'simulationCreditApprovalDelayUnit'],
-  ['simulationLimitIncreaseRequestIntervalInput', '3600', 'simulationLimitIncreaseRequestIntervalUnit'],
+  ['simulationAdvanceDelayInput', '30', 'simulationAdvanceDelayUnit'],
+  ['simulationLimitIncreaseRequestIntervalInput', '86400', 'simulationLimitIncreaseRequestIntervalUnit'],
   ['simulationLimitIncreaseApprovalDelayInput', '60', 'simulationLimitIncreaseApprovalDelayUnit'],
   ['simulationPayment6IntervalInput', '300', 'simulationPayment6IntervalUnit'],
   ['simulationPayment12IntervalInput', '180', 'simulationPayment12IntervalUnit'],
+  ['simulationAdvancePayment6IntervalInput', '300', 'simulationAdvancePayment6IntervalUnit'],
+  ['simulationAdvancePayment12IntervalInput', '180', 'simulationAdvancePayment12IntervalUnit'],
   ['simulationTreasuryDistributionIntervalInput', '3600', 'simulationTreasuryDistributionIntervalUnit'],
   ['simulationAutomaticTransferIntervalInput', '3600', 'simulationAutomaticTransferIntervalUnit'],
   ['simulationAutomaticWithdrawalIntervalInput', '3600', 'simulationAutomaticWithdrawalIntervalUnit']
@@ -36,7 +39,10 @@ const intervalControls = [
 intervalControls.forEach(([input, value, unit]) => { ensure(input, value); ensure(unit, 'seconds'); });
 const db = {
   simulationSettings: { treasuryTimerRate: 1000 }, simulationAutomation: { paused: false }, withdrawalTreasury: { lastAccruedAt: 'old' },
-  limitIncreaseRequests: [], creditApplications: [], loans: []
+  limitIncreaseRequests: [], creditApplications: [], loans: [
+    { id: 'advance-loan', accountId: 1, status: 'Activo', outstandingPrincipal: 1000000, termMonths: 6, paymentScheduleType: 'advance' },
+    { id: 'credit-loan', accountId: 1, status: 'Activo', outstandingPrincipal: 1000000, termMonths: 6, paymentScheduleType: 'credit' }
+  ]
 };
 let accruedAtRate = null;
 let savedCount = 0;
@@ -46,10 +52,10 @@ const context = {
   $: (selector) => ensure(String(selector).replace(/^#/, '')),
   simulationSettingsFor: (database) => ({
     monthlyInterestRate: 0.02, analystCapital: 2000000000, limitIncreaseAmount: 50000000,
-    treasuryTimerRate: 1000, treasuryTimerIncomeCap: Number.MAX_SAFE_INTEGER,
-    creditRequestIntervalSeconds: 3600, automaticCreditApprovalDelaySeconds: 60,
-    limitIncreaseRequestIntervalSeconds: 3600, automaticLimitIncreaseApprovalDelaySeconds: 60,
-    paymentInterval6Seconds: 300, paymentInterval12Seconds: 180, treasuryDistributionIntervalSeconds: 3600,
+    treasuryTimerRate: 1000, treasuryTimerIncomeCap: Number.MAX_SAFE_INTEGER, automaticAnalystCapitalReserve: 500000000,
+    creditRequestIntervalSeconds: 3600, automaticCreditApprovalDelaySeconds: 60, automaticAdvanceDelaySeconds: 30,
+    limitIncreaseRequestIntervalSeconds: 86400, automaticLimitIncreaseApprovalDelaySeconds: 60,
+    paymentInterval6Seconds: 300, paymentInterval12Seconds: 180, advancePaymentInterval6Seconds: 300, advancePaymentInterval12Seconds: 180, treasuryDistributionIntervalSeconds: 3600,
     automaticTransferIntervalSeconds: 3600, automaticWithdrawalIntervalSeconds: 3600,
     automaticCreditMinimumAmount: 100000, automaticCreditMaximumAmount: 100000000,
     automaticAdvanceMinimumAmount: 100000, automaticAdvanceMaximumAmount: 100000000,
@@ -60,7 +66,11 @@ const context = {
   captureDatabaseRevision: () => 'revision', isDatabaseRevisionCurrent: (token) => token === 'revision',
   catchUpAutomaticEventsBeforeOperation: () => true,
   accrueWithdrawalTreasury(database) { accruedAtRate = database.simulationSettings.treasuryTimerRate; },
-  automaticPaymentIntervalForTerm: (term) => term === 6 ? 300 : 180,
+  automaticPaymentIntervalForTerm: (term, database = db, scheduleType = 'credit') => {
+    const settings = database.simulationSettings || {};
+    if (scheduleType === 'advance') return term === 6 ? (settings.advancePaymentInterval6Seconds || 300) : (settings.advancePaymentInterval12Seconds || 180);
+    return term === 6 ? (settings.paymentInterval6Seconds || 300) : (settings.paymentInterval12Seconds || 180);
+  },
   recordAuditEvent(action, options) { auditDetails = options.details || null; },
   saveDatabase() { savedCount += 1; return true; },
   renderReviewerDashboard() {}, renderFinancialAuditPanel() {}, renderMonthlyFinancialReport() {},
@@ -72,13 +82,24 @@ vm.runInContext(fs.readFileSync(path.join(__dirname, '..', 'src/js/23b-simulatio
 context.renderSimulationSettingsPanel();
 assert(ensure('simulationMonthlyRateInput').value === '2' && ensure('simulationTreasuryRateInput').value === '1000', 'El panel debe cargar tasa y ritmo guardados.');
 assert(ensure('simulationAnalystCapitalInput').value === '2000000000', 'El capital base debe iniciar en $2.000 millones.');
+assert(ensure('simulationAnalystReserveInput').value === '500000000', 'El panel protege $500 millones de capital para la automatización.');
 ensure('simulationMonthlyRateInput').value = '1.75';
 ensure('simulationTreasuryRateInput').value = '1500';
 ensure('simulationLimitIncreaseAmountInput').value = '25000000';
+ensure('simulationAnalystReserveInput').value = '500000000';
+ensure('simulationAdvancePayment6IntervalUnit').value = 'seconds';
+ensure('simulationAdvancePayment12IntervalUnit').value = 'seconds';
+ensure('simulationAdvancePayment6IntervalInput').value = '45';
+ensure('simulationAdvancePayment12IntervalInput').value = '90';
 ensure('simulationSettingsForm').listeners.submit({ preventDefault() {} });
 assert(accruedAtRate === 1000, 'El tiempo anterior al cambio debe liquidarse con la tarifa previa.');
 assert(db.simulationSettings.monthlyInterestRate === 0.0175 && db.simulationSettings.treasuryTimerRate === 1500, 'El panel debe guardar tasa y ritmo nuevos.');
 assert(db.simulationSettings.limitIncreaseAmount === 25000000, 'El panel debe guardar el nuevo saldo de cada aumento de cupo.');
+assert(db.simulationSettings.automaticAnalystCapitalReserve === 500000000, 'El panel debe guardar la reserva protegida.');
+assert(db.simulationSettings.advancePaymentInterval6Seconds === 45 && db.simulationSettings.advancePaymentInterval12Seconds === 90, 'El panel debe guardar los intervalos de cuotas de avances por separado.');
+assert(db.simulationSettings.paymentInterval6Seconds === 300 && db.simulationSettings.paymentInterval12Seconds === 180, 'Configurar las cuotas de avances no debe cambiar los intervalos generales de créditos.');
+assert(db.loans.find((loan) => loan.id === 'advance-loan').automaticPaymentIntervalSeconds === 45, 'Las deudas por avances deben adoptar su intervalo exclusivo.');
+assert(db.loans.find((loan) => loan.id === 'credit-loan').automaticPaymentIntervalSeconds === 300, 'Las deudas de crédito deben conservar su intervalo general.');
 assert(db.simulationSettings.treasuryTimerIncomeCap === Number.MAX_SAFE_INTEGER, 'Tesorería debe conservar la acumulación sin tope comercial.');
 assert(savedCount === 1 && auditDetails.limitIncreaseAmount === 25000000, 'El guardado y la auditoría deben incluir el importe de aumento.');
 

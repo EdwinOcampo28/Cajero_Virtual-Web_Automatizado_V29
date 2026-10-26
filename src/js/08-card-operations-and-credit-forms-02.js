@@ -59,9 +59,7 @@
     const request = {
       id: createId(), accountId: current.id, applicantName: current.name, accountNumber: current.accountNumber,
       previousLimit: currentLimit, increaseAmount, requestedLimit, termMonths: 12, status: 'En revisión', date: new Date().toISOString(),
-      autoApprovalAt: simulationSettingsFor(db).automaticLimitIncreaseApprovalEnabled === true
-        ? new Date(Date.now() + simulationSettingsFor(db).automaticLimitIncreaseApprovalDelaySeconds * 1000).toISOString()
-        : null
+      autoApprovalAt: new Date(Date.now() + simulationSettingsFor(db).automaticLimitIncreaseApprovalDelaySeconds * 1000).toISOString()
     };
     if (!Array.isArray(db.limitIncreaseRequests)) db.limitIncreaseRequests = [];
     db.limitIncreaseRequests.unshift(request);
