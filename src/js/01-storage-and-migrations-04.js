@@ -283,7 +283,7 @@
   }
 
   let storageCompactionNoticeShown = false;
-  function saveDatabase() {
+  function saveDatabase(options = {}) {
     let compactedForSave = false;
     try {
       const currentRaw = localStorage.getItem(STORAGE_KEY);
@@ -297,8 +297,10 @@
         showToast('Otra pestaña modificó los datos. Esta operación no se guardó para evitar sobrescribir cambios; revisa los saldos actualizados.', 'error');
         return false;
       }
-      const automationCatchup = typeof processSimulationAutomationEvents === 'function' ? processSimulationAutomationEvents(Date.now()) : null;
-      if (automationCatchup?.caughtUp !== false) accrueWithdrawalTreasury();
+      const automationCatchup = options.skipAutomationCatchup
+        ? null
+        : (typeof processSimulationAutomationEvents === 'function' ? processSimulationAutomationEvents(Date.now()) : null);
+      if (!options.skipAutomationCatchup && automationCatchup?.caughtUp !== false) accrueWithdrawalTreasury();
       compactedForSave = compactDatabaseForStorage(db);
       let serialized = JSON.stringify(db);
       try {
@@ -311,6 +313,7 @@
       }
       lastPersistedRaw = serialized;
       dbRevision += 1;
+      if (automationCatchup?.caughtUp === false && typeof scheduleSimulationAutomationCatchUp === 'function') scheduleSimulationAutomationCatchUp();
       if (typeof simulationAutomationInitialSaveDone !== 'undefined') simulationAutomationInitialSaveDone = true;
       if (typeof simulationAutomationLastSavedAt !== 'undefined') simulationAutomationLastSavedAt = Date.now();
       // Notifica a otras pestañas después de persistir el estado. El módulo realtime

@@ -1,6 +1,6 @@
-  async function resetDemoData() {
+  async function resetDemoData(alreadyConfirmed = false) {
     const transactionRevision = captureDatabaseRevision();
-    const confirmed = await showAppDialog({
+    const confirmed = alreadyConfirmed || await showAppDialog({
       type: 'confirm',
       title: 'Borrar todos los datos del sistema',
       message: 'Esta acción eliminará los saldos y todos los registros guardados del cajero: movimientos, solicitudes, créditos, desembolsos, cuotas, abonos e intereses acumulados. Las tres cuentas de prueba y sus PIN se conservarán para poder volver a entrar, pero quedarán en $ 0 y sin historial. La Tesorería también se reiniciará a $ 0 y su cronómetro empezará de nuevo. La copia independiente de configuración se conservará y se aplicará al sistema limpio. Esta acción no se puede deshacer.',

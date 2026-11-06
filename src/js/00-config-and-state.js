@@ -109,3 +109,22 @@
   let toastTimer = null;
   let previousFocusedElement = null;
 
+  // Start observing before the database is loaded so a long startup stall is
+  // still reported once the rest of the app has initialized.
+  window.__cajeroLongTaskDurations = [];
+  window.__cajeroLongTaskRecoveryHandler = null;
+  try {
+    const recoveryObserver = new PerformanceObserver((list) => {
+      const durations = list.getEntries().filter((entry) => entry.duration >= 8000).map((entry) => entry.duration);
+      if (typeof window.__cajeroLongTaskRecoveryHandler === 'function') {
+        durations.forEach(window.__cajeroLongTaskRecoveryHandler);
+      } else {
+        window.__cajeroLongTaskDurations.push(...durations);
+      }
+    });
+    recoveryObserver.observe({ type: 'longtask', buffered: true });
+    window.__cajeroLongTaskObserver = recoveryObserver;
+  } catch (error) {
+    window.__cajeroLongTaskObserver = null;
+  }
+

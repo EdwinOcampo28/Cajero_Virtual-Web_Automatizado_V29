@@ -1,5 +1,12 @@
   // Inicialización tardía: todos los módulos de lógica ya están cargados.
   db = loadDatabase();
+  if (databaseLoadIssue) {
+    const recoveryMessage = $('#databaseRecoveryMessage');
+    if (recoveryMessage) {
+      recoveryMessage.textContent = 'No se pudieron validar los datos guardados. No se borraron. Si tienes una copia, entra como analista e impórtala; si no, usa “Borrar datos guardados” y confirma para reiniciar.';
+      recoveryMessage.hidden = false;
+    }
+  }
 
   reviewerAccessButton.addEventListener('click', enterReviewerLogin);
   $('#backToClientLogin').addEventListener('click', returnToClientLogin);

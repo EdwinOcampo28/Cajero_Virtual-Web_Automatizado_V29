@@ -12,8 +12,14 @@
     return queuedAmount || Math.max(0, roundMoney(Number(application.cardFundsRemaining) || 0));
   }
   const SIMULATION_AUTOMATION_SAVE_MS = 15000;
-  const SIMULATION_AUTOMATION_EVENT_LIMIT = 20000;
+  // Recover overdue operations in short batches so catch-up does not lock the UI.
+  const SIMULATION_AUTOMATION_EVENT_LIMIT = 200;
+  const SIMULATION_AUTOMATION_CATCHUP_YIELD_MS = 40;
   let simulationAutomationTimerId = null;
+  let simulationAutomationCatchUpTimerId = null;
+  let simulationAutomationCatchUpNoticeAt = 0;
+  let longTaskRecoveryInProgress = false;
+  let longTaskRecoveryObserver = null;
   let simulationAutomationLastSavedAt = Date.now();
   let simulationAutomationProcessing = false;
   let simulationAutomationInitialSaveDone = false;
@@ -492,6 +498,7 @@
 
   function processSimulationAutomationEvents(now = Date.now()) {
     if (!db?.simulationAutomation || databaseLoadIssue || simulationAutomationProcessing) return { changed: false, eventsChanged: false, count: 0 };
+    if (longTaskRecoveryInProgress) return { changed: false, eventsChanged: false, count: 0, caughtUp: true, recoveryPrompt: true };
     if (db.simulationAutomation.paused) return { changed: false, eventsChanged: false, count: 0, caughtUp: true, paused: true };
     simulationAutomationProcessing = true;
     let changed = false;
@@ -542,6 +549,7 @@
     const result = processSimulationAutomationEvents(now);
     if (result.caughtUp === false) {
       showToast('Se están recuperando operaciones automáticas anteriores. Espera un momento e inténtalo de nuevo.', 'error');
+      scheduleSimulationAutomationCatchUp();
       return false;
     }
     if (result.eventsChanged && readCurrentStorageRaw() === lastPersistedRaw && !saveDatabase()) return false;
@@ -550,15 +558,102 @@
   function persistAndRefreshSimulationAutomation(now = Date.now()) {
     const result = processSimulationAutomationEvents(now);
     const shouldSave = result.eventsChanged || !simulationAutomationInitialSaveDone || now - simulationAutomationLastSavedAt >= SIMULATION_AUTOMATION_SAVE_MS;
-    if (!shouldSave || readCurrentStorageRaw() !== lastPersistedRaw) return result;
-    if (saveDatabase()) {
+    let saved = false;
+    if (shouldSave && readCurrentStorageRaw() === lastPersistedRaw) {
+      saved = saveDatabase({ skipAutomationCatchup: true });
+    }
+    if (saved) {
       simulationAutomationInitialSaveDone = true;
       simulationAutomationLastSavedAt = Date.now();
       if (result.eventsChanged && typeof refreshRealtimeVisibleViews === 'function') {
         refreshRealtimeVisibleViews({ notify: false, reason: 'automatizacion' });
       }
     }
+    if (result.caughtUp === false && !db?.simulationAutomation?.paused && readCurrentStorageRaw() === lastPersistedRaw) {
+      const currentTime = Date.now();
+      if (currentTime - simulationAutomationCatchUpNoticeAt >= 3500) {
+        simulationAutomationCatchUpNoticeAt = currentTime;
+        showToast('Recuperando operaciones atrasadas por tandas. Tus datos siguen guardados; no es necesario borrarlos.', 'info');
+      }
+      scheduleSimulationAutomationCatchUp();
+    } else if (result.caughtUp !== false) {
+      simulationAutomationCatchUpNoticeAt = 0;
+      if (simulationAutomationCatchUpTimerId !== null) {
+        window.clearTimeout(simulationAutomationCatchUpTimerId);
+        simulationAutomationCatchUpTimerId = null;
+      }
+    }
     return result;
+  }
+
+  function scheduleSimulationAutomationCatchUp() {
+    if (simulationAutomationCatchUpTimerId !== null || databaseLoadIssue || db?.simulationAutomation?.paused) return;
+    simulationAutomationCatchUpTimerId = window.setTimeout(() => {
+      simulationAutomationCatchUpTimerId = null;
+      persistAndRefreshSimulationAutomation(Date.now());
+    }, SIMULATION_AUTOMATION_CATCHUP_YIELD_MS);
+  }
+
+  async function handleLongTaskRecovery(durationMs) {
+    if (longTaskRecoveryInProgress) return;
+    longTaskRecoveryInProgress = true;
+    try {
+      const backup = await downloadAutomaticRecoveryBackup();
+      if (!backup.ok) {
+        while (appDialogResolver) await new Promise((resolve) => window.setTimeout(resolve, 100));
+        await showAppDialog({
+          type: 'alert',
+          title: 'La página dejó de responder',
+          message: `La página estuvo bloqueada unos ${Math.round(durationMs / 1000)} segundos. No se pudo preparar el respaldo (${backup.error}); por seguridad no se borró ningún dato. Descarga una copia desde Respaldos antes de reiniciar.`,
+          eyebrow: 'RECUPERACIÓN SEGURA',
+          icon: '!',
+          confirmText: 'Entendido',
+          danger: true
+        });
+        return;
+      }
+      while (appDialogResolver) await new Promise((resolve) => window.setTimeout(resolve, 100));
+      const confirmed = await showAppDialog({
+        type: 'confirm',
+        title: 'La página dejó de responder',
+        message: `La página estuvo bloqueada unos ${Math.round(durationMs / 1000)} segundos. Se inició la descarga de ${backup.filename}. Revisa que aparezca en Descargas; si no aparece, cancela y conserva los datos. ¿Quieres borrar los datos de la demostración y reiniciarla?`,
+        eyebrow: 'RESPALDO PREPARADO · CONFIRMA EL BORRADO',
+        icon: '!',
+        confirmText: 'Borrar datos',
+        cancelText: 'Conservar datos',
+        danger: true
+      });
+      if (confirmed) await resetDemoData(true);
+    } catch (error) {
+      showToast('La página se recuperó, pero no pudo completar el respaldo. Los datos se conservaron.', 'error');
+    } finally {
+      longTaskRecoveryInProgress = false;
+    }
+  }
+
+  function startLongTaskRecoveryWatchdog() {
+    if (window.__cajeroLongTaskObserver) {
+      longTaskRecoveryObserver = window.__cajeroLongTaskObserver;
+      window.__cajeroLongTaskRecoveryHandler = handleLongTaskRecovery;
+      const pending = Array.isArray(window.__cajeroLongTaskDurations) ? window.__cajeroLongTaskDurations.splice(0) : [];
+      pending.forEach(handleLongTaskRecovery);
+      return;
+    }
+    if (typeof PerformanceObserver !== 'function') return;
+    try {
+      longTaskRecoveryObserver = new PerformanceObserver((list) => {
+        const longTask = list.getEntries().find((entry) => entry.duration >= 8000);
+        if (longTask) handleLongTaskRecovery(longTask.duration);
+      });
+      try {
+        longTaskRecoveryObserver.observe({ type: 'longtask', buffered: true });
+      } catch (error) {
+        longTaskRecoveryObserver.observe({ entryTypes: ['longtask'] });
+      }
+      window.__cajeroLongTaskRecoveryHandler = handleLongTaskRecovery;
+    } catch (error) {
+      longTaskRecoveryObserver = null;
+    }
   }
 
   function runSimulationAutomationTick() {
@@ -647,6 +742,7 @@
   function startSimulationAutomation() {
     if (simulationAutomationTimerId !== null) return;
     simulationAutomationInitialSaveDone = !simulationAutomationNeedsInitialSave();
+    startLongTaskRecoveryWatchdog();
     runSimulationAutomationTick();
     simulationAutomationTimerId = window.setInterval(runSimulationAutomationTick, SIMULATION_AUTOMATION_TICK_MS);
   }

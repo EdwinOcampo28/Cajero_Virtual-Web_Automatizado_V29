@@ -323,6 +323,13 @@ El panel permite configurar cada cuánto se generan solicitudes automáticas de 
 - El borrado elimina primero los datos dañados y luego intenta guardar una base limpia. Si el navegador no tiene espacio, los datos previos siguen borrados y se puede volver a abrir la aplicación para crear una nueva demostración.
 - La etiqueta de esta entrega es **v29**.
 
+## Recuperación si la página se bloquea
+
+- Las operaciones automáticas atrasadas se recuperan en tandas de 200 para mantener la interfaz disponible después de reabrir la página.
+- Si el navegador registra un bloqueo del hilo principal de al menos 8 segundos, la aplicación intenta descargar una copia JSON y luego pregunta si quieres borrar y reiniciar los datos.
+- El borrado requiere confirmación. Si el respaldo no se pudo preparar, no se ofrece borrar los datos. Si el navegador bloquea la descarga automática, cancela el reinicio y descarga primero desde **Respaldos**.
+- En navegadores que no informan bloqueos largos, las tandas de recuperación siguen activas y los datos dañados muestran la opción de importar un respaldo o borrar manualmente desde el inicio.
+
 ## Automatización protegida y avances parciales
 
 - El panel del analista separa **Avances** de **Créditos**. Cada avance parcial aparece con su importe, plazo y fecha; el saldo que queda en la tarjeta conserva su propio reintento automático.

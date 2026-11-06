@@ -139,6 +139,39 @@
     }
   }
 
+  async function downloadAutomaticRecoveryBackup() {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    let backup;
+    let filename = `Cajero_Virtual_Respaldo_Recuperacion_${timestamp}.json`;
+    try {
+      if (databaseLoadIssue) {
+        backup = {
+          format: 'cajero-virtual-recovery-snapshot',
+          exportedAt: new Date().toISOString(),
+          storageKey: STORAGE_KEY,
+          databaseLoadIssue: true,
+          rawStorage: localStorage.getItem(STORAGE_KEY)
+        };
+      } else {
+        backup = await makeBackupEnvelope();
+        filename = `Cajero_Virtual_Copia_Seguridad_${timestamp}.json`;
+      }
+      const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.hidden = true;
+      document.body.append(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 10000);
+      return { ok: true, filename };
+    } catch (error) {
+      return { ok: false, filename: '', error: error?.message || 'No se pudo preparar el archivo.' };
+    }
+  }
+
   async function importSystemBackupFile(file) {
     if (!reviewerSession) {
       showToast('Solo el analista puede importar una copia completa del sistema.', 'error');
